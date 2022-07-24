@@ -1,7 +1,7 @@
 use clap::{crate_authors, crate_name, crate_version, Arg};
 use i2cdev::core::*;
 use i2cdev::linux::{LinuxI2CDevice, LinuxI2CError};
-use prometheus_exporter::{self, prometheus::register_gauge_vec};
+use prometheus_exporter::{self, prometheus::register_gauge_vec, prometheus::register_int_gauge_vec};
 use std::env;
 use std::net::IpAddr;
 
@@ -108,18 +108,28 @@ fn main() -> PMBusResult<()> {
     let bind = (addr, port).into();
 
     let exporter = prometheus_exporter::start(bind).unwrap();
+    println!("listening on http://{bind}/metrics");
 
-    let rpm_gague   = register_gauge_vec!(format!("{PREFIX}_fan_rpm"),		"Speed of the fan",				&["bus", "module"]).unwrap();
-    let ivolt_gague = register_gauge_vec!(format!("{PREFIX}_input_voltage"),	"Input voltage from outlet",			&["bus", "module"]).unwrap();
-    let icur_gague  = register_gauge_vec!(format!("{PREFIX}_input_current"),	"Input current (amp) from outlet",		&["bus", "module"]).unwrap();
-    let ipow_gague  = register_gauge_vec!(format!("{PREFIX}_input_power"),		"Power (W) being drawn from outlet",		&["bus", "module"]).unwrap();
-    let ovolt_gague = register_gauge_vec!(format!("{PREFIX}_output_voltage"),	"Voltage provided to PSU",			&["bus", "module"]).unwrap();
-    let ocur_gague  = register_gauge_vec!(format!("{PREFIX}_output_current"),	"Current (amp) provided to the main PSU",	&["bus", "module"]).unwrap();
-    let opow_gague  = register_gauge_vec!(format!("{PREFIX}_output_power"),	"Power (W) being drawn by the PSU",		&["bus", "module"]).unwrap();
-    let temp_gague  = register_gauge_vec!(format!("{PREFIX}_temperature"),		"Temperature",					&["bus", "module", "sensor"]).unwrap();
+    let rpm_gauge   = register_int_gauge_vec!(format!("{PREFIX}_fan_rpm"),	"Speed of the fan",				&["bus", "module"]).unwrap();
+    let ivolt_gauge = register_gauge_vec!(format!("{PREFIX}_input_voltage"),	"Input voltage from outlet",			&["bus", "module"]).unwrap();
+    let icur_gauge  = register_gauge_vec!(format!("{PREFIX}_input_current"),	"Input current (amp) from outlet",		&["bus", "module"]).unwrap();
+    let ipow_gauge  = register_gauge_vec!(format!("{PREFIX}_input_power"),	"Power (W) being drawn from outlet",		&["bus", "module"]).unwrap();
+    let ovolt_gauge = register_gauge_vec!(format!("{PREFIX}_output_voltage"),	"Voltage provided to PSU",			&["bus", "module"]).unwrap();
+    let ocur_gauge  = register_gauge_vec!(format!("{PREFIX}_output_current"),	"Current (amp) provided to the main PSU",	&["bus", "module"]).unwrap();
+    let opow_gauge  = register_gauge_vec!(format!("{PREFIX}_output_power"),	"Power (W) being drawn by the PSU",		&["bus", "module"]).unwrap();
+    let temp_gauge  = register_gauge_vec!(format!("{PREFIX}_temperature"),	"Temperature",					&["bus", "module", "sensor"]).unwrap();
 
     loop {
         // Will block until a new request comes in.
+        rpm_gauge.reset();
+        ivolt_gauge.reset();
+        icur_gauge.reset();
+        ipow_gauge.reset();
+        ovolt_gauge.reset();
+        ocur_gauge.reset();
+        opow_gauge.reset();
+        temp_gauge.reset();
+
         let _guard = exporter.wait_request();
 
         for module in &["1", "2"] {
@@ -128,40 +138,33 @@ fn main() -> PMBusResult<()> {
                 &"2" => MOD2_ADDR,
                 _ => continue,
             };
-            match rpm_gague.get_metric_with_label_values(&[dev, &module]) {
-                Ok(gague) => gague.set(read_word(&dev, mod_addr, FAN_SPEED_CMD)? as f64),
-                Err(_) => todo!("This shouldn't happen, but add a log here"),
-            }
+            rpm_gauge
+                .with_label_values(&[dev, &module])
+                .set(read_word(&dev, mod_addr, FAN_SPEED_CMD)? as i64);
 
-            match ivolt_gague.get_metric_with_label_values(&[dev, &module]) {
-                Ok(gauge) => gauge.set(read_linear16(&dev, MOD1_ADDR, IVOLT_CMD, OVOLT_EXP_CMD)? as f64),
-                Err(_) => todo!("This shouldn't happen, but add a log here"),
-            }
+            ivolt_gauge
+                .with_label_values(&[dev, &module])
+                .set(read_linear16(&dev, MOD1_ADDR, IVOLT_CMD, OVOLT_EXP_CMD)? as f64);
 
-            match icur_gague.get_metric_with_label_values(&[dev, &module]) {
-                Ok(gauge) => gauge.set(read_linear11(&dev, MOD1_ADDR, ICUR_CMD)? as f64),
-                Err(_) => todo!("This shouldn't happen, but add a log here"),
-            }
+            icur_gauge
+                .with_label_values(&[dev, &module])
+                .set(read_linear11(&dev, MOD1_ADDR, ICUR_CMD)? as f64);
 
-            match ipow_gague.get_metric_with_label_values(&[dev, &module]) {
-                Ok(gauge) => gauge.set(read_linear11(&dev, MOD1_ADDR, IPOW_CMD)? as f64),
-                Err(_) => todo!("This shouldn't happen, but add a log here"),
-            }
+            ipow_gauge
+                .with_label_values(&[dev, &module])
+                .set(read_linear11(&dev, MOD1_ADDR, IPOW_CMD)? as f64);
 
-            match ovolt_gague.get_metric_with_label_values(&[dev, &module]) {
-                Ok(gauge) => gauge.set(read_linear16(&dev, MOD1_ADDR, OVOLT_MANT_CMD, OVOLT_EXP_CMD)? as f64),
-                Err(_) => todo!("This shouldn't happen, but add a log here"),
-            }
+            ovolt_gauge
+                .with_label_values(&[dev, &module])
+                .set(read_linear16(&dev, MOD1_ADDR, OVOLT_MANT_CMD, OVOLT_EXP_CMD)? as f64);
 
-            match ocur_gague.get_metric_with_label_values(&[dev, &module]) {
-                Ok(gauge) => gauge.set(read_linear11(&dev, MOD1_ADDR, OCUR_CMD)? as f64),
-                Err(_) => todo!("This shouldn't happen, but add a log here"),
-            }
+            ocur_gauge
+                .with_label_values(&[dev, &module])
+                .set(read_linear11(&dev, MOD1_ADDR, OCUR_CMD)? as f64);
 
-            match opow_gague.get_metric_with_label_values(&[dev, &module]) {
-                Ok(gauge) => gauge.set(read_linear11(&dev, MOD1_ADDR, OPOW_CMD)? as f64),
-                Err(_) => todo!("This shouldn't happen, but add a log here"),
-            }
+            opow_gauge
+                .with_label_values(&[dev, &module])
+                .set(read_linear11(&dev, MOD1_ADDR, OPOW_CMD)? as f64);
 
             for temp_sensor in &["1", "2"] {
                 let temp_cmd = match temp_sensor {
@@ -169,10 +172,9 @@ fn main() -> PMBusResult<()> {
                     &"2" => TEMP2_CMD,
                     _ => continue,
                 };
-                match temp_gague.get_metric_with_label_values(&[dev, &module, &temp_sensor]) {
-                    Ok(gauge) => gauge.set(read_linear11(&dev, MOD1_ADDR, temp_cmd)? as f64),
-                    Err(_) => todo!("This shouldn't happen, but add a log here"),
-                }
+                temp_gauge
+                    .with_label_values(&[dev, &module, &temp_sensor])
+                    .set(read_linear11(&dev, MOD1_ADDR, temp_cmd)? as f64);
             }
         }
     }
